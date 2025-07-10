@@ -40,7 +40,7 @@ Create an IAM Role in AWS with:
 Trust relationship allowing GitHub Actions from your repo to assume the role via OIDC.
 
 Permissions policy allowing access to services like Lambda, S3, Secrets Manager, etc.
-===========================
+
 Example trust policy for GitHub OIDC:
 
 json
@@ -69,7 +69,7 @@ Trust relationships json code:
         }
     ]
 }
-================================================
+
 5. Terraform Backend Configuration
 The project uses Terraform Cloud remote backend, configured in main.tf with:
 
