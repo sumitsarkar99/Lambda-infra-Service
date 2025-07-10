@@ -1,0 +1,159 @@
+name: Deploy Lambda Code
+
+on:
+  workflow_dispatch:
+
+jobs:
+  deploy-lambda:
+    name: Deploy Lambda Code to AWS
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+
+    environment: development
+    env:
+      ACTIONS_STEP_DEBUG: true
+      ACTIONS_RUNNER_DEBUG: true
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          role-to-assume: <your IAM role ARN for Github authentication>
+          role-session-name: GitHubActionsSession
+          aws-region: ap-southeast-2
+
+      #- name: Configure AWS credentials
+        #id: aws_creds
+        #uses: aws-actions/configure-aws-credentials@v2
+        #with:
+          #aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          #aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          #aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          #aws-region: ap-southeast-2
+
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: 3.12
+
+      - name: Install dependencies
+        working-directory: src
+        run: |
+          pip install -r requirements.txt -t python
+          cp -r python/* .
+          rm -rf python
+
+      - name: Package Lambda code
+        working-directory: src
+        run: zip -r lambda.zip . -x "*.git*" "__pycache__/*"
+
+      - name: Upload Lambda code to S3
+        run: aws s3 cp src/lambda.zip s3://${{ secrets.S3_BUCKET }}/test2786/lambda.zip
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v1
+        with:
+          cli_config_credentials_token: ${{ secrets.TF_API_TOKEN }}
+
+      - name: Clean Terraform state
+        working-directory: ./edw/test/admin/sbx
+        run: rm -rf .terraform terraform.tfstate terraform.tfstate.backup
+
+      - name: Terraform Init (TFC Remote Backend)
+        working-directory: ./edw/test/admin/sbx
+        run: terraform init -input=false
+
+      
+      #- name: Debug TFC Token Access
+        #run: |
+          #echo "Checking access to Terraform Cloud Registry Modules..."
+          #curl -s -H "Authorization: Bearer ${{ secrets.TF_API_TOKEN }}" \
+            #https://app.terraform.io/api/v2/organizations/FMGL/registry-modules | jq
+
+      
+      - name: Get secrets from AWS Secrets Manager
+        id: get_secrets
+        run: |
+          API_KEY=$(aws secretsmanager get-secret-value --secret-id lambda-poc06-dev06-API_KEY --query SecretString --output text)
+          DATABASE_URL=$(aws secretsmanager get-secret-value --secret-id lambda-poc06-dev06-DATABASE_URL --query SecretString --output text)
+
+          echo "TF_VAR_lambda_environment_variables={\"API_KEY\":\"$API_KEY\",\"DATABASE_URL\":\"$DATABASE_URL\",\"LOG_LEVEL\":\"INFO\",\"REGION\":\"ap-southeast-2\"}" >> $GITHUB_ENV
+
+      - name: Create Terraform Plan via TFC (create-run)
+        id: plan
+        uses: hashicorp/tfc-workflows-github/actions/create-run@v1.3.0
+        with:
+          hostname: app.terraform.io
+          token: ${{ secrets.TF_API_TOKEN }}
+          organization: FMGL
+          workspace: new-aws-test-repo
+          plan_only: true
+
+      - name: Debug TFC run_id output
+        run: echo "TFC run_id is ${{ steps.plan.outputs.run_id }}"
+
+
+      - name: Terraform Apply via TFC (apply-run)
+        uses: hashicorp/tfc-workflows-github/actions/apply-run@v1.3.0
+        with:
+          hostname: app.terraform.io
+          token: ${{ secrets.TF_API_TOKEN }}
+          organization: FMGL
+          run: ${{ steps.plan.outputs.run_id }}
+
+      - name: Wait 5 minutes for Apply to finish
+        run: |
+          echo "Waiting 5 minutes to ensure TFC Apply completes before post-deployment steps..."
+          sleep 300
+
+
+
+
+      - name: Create/Update AWS Secrets (optional post-deployment step)
+        env:
+          SECRET_JSON: ${{ secrets.LAMBDA_JSON_SECRET }}
+        run: |
+          echo "$SECRET_JSON" > secrets.json
+          for key in $(jq -r 'keys[]' secrets.json); do
+            value=$(jq -r --arg k "$key" '.[$k]' secrets.json)
+            secret_name="lambda-poc06-dev06-$key"
+            aws secretsmanager create-secret --name "$secret_name" --secret-string "$value" 2>/dev/null || \
+            aws secretsmanager put-secret-value --secret-id "$secret_name" --secret-string "$value"
+          done
+
+      - name: Inject secret values as Lambda environment variables (Post Apply)
+        run: |
+          prefix="lambda-poc09"
+          environment="dev09"
+          lambda_key="default"
+
+          lambda_name="${prefix}-${environment}-${lambda_key}"
+          secret_prefix="${prefix}-${environment}"
+
+          # Fail-safe: Check if Lambda exists
+          echo "Verifying if Lambda function $lambda_name exists..."
+          if ! aws lambda get-function --function-name "$lambda_name" >/dev/null 2>&1; then
+            echo "Lambda function $lambda_name does not exist. Skipping secret injection."
+            exit 1
+          fi
+          echo "Injecting secrets as environment variables into Lambda: $lambda_name"
+
+          env_vars=""
+          for arn in $(aws secretsmanager list-secrets --query "SecretList[?starts_with(Name, '${secret_prefix}')].ARN" --output text); do
+            secret_val=$(aws secretsmanager get-secret-value --secret-id "$arn" --query SecretString --output text)
+            key=$(basename "$arn" | sed "s/^${secret_prefix}-//" | sed 's/[^a-zA-Z0-9_]/_/g')
+            env_vars="${env_vars}${key}=${secret_val},"
+          done
+
+          env_vars="${env_vars%,}"
+
+          aws lambda update-function-configuration \
+            --function-name "$lambda_name" \
+            --environment "Variables={$env_vars}"
+            
