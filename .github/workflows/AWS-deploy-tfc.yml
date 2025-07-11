@@ -62,11 +62,11 @@ jobs:
           cli_config_credentials_token: ${{ secrets.TF_API_TOKEN }}
 
       - name: Clean Terraform state
-        working-directory: ./edw/test/admin/sbx
+        working-directory: ./dev
         run: rm -rf .terraform terraform.tfstate terraform.tfstate.backup
 
       - name: Terraform Init (TFC Remote Backend)
-        working-directory: ./edw/test/admin/sbx
+        working-directory: ./dev
         run: terraform init -input=false
 
       
@@ -80,8 +80,8 @@ jobs:
       - name: Get secrets from AWS Secrets Manager
         id: get_secrets
         run: |
-          API_KEY=$(aws secretsmanager get-secret-value --secret-id lambda-poc06-dev06-API_KEY --query SecretString --output text)
-          DATABASE_URL=$(aws secretsmanager get-secret-value --secret-id lambda-poc06-dev06-DATABASE_URL --query SecretString --output text)
+          API_KEY=$(aws secretsmanager get-secret-value --secret-id lambda-poc01-dev01-API_KEY --query SecretString --output text)
+          DATABASE_URL=$(aws secretsmanager get-secret-value --secret-id lambda-poc01-dev01-DATABASE_URL --query SecretString --output text)
 
           echo "TF_VAR_lambda_environment_variables={\"API_KEY\":\"$API_KEY\",\"DATABASE_URL\":\"$DATABASE_URL\",\"LOG_LEVEL\":\"INFO\",\"REGION\":\"ap-southeast-2\"}" >> $GITHUB_ENV
 
@@ -129,8 +129,8 @@ jobs:
 
       - name: Inject secret values as Lambda environment variables (Post Apply)
         run: |
-          prefix="lambda-poc09"
-          environment="dev09"
+          prefix="lambda-poc01"
+          environment="dev01"
           lambda_key="default"
 
           lambda_name="${prefix}-${environment}-${lambda_key}"
