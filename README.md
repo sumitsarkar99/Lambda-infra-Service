@@ -52,7 +52,43 @@ Trust relationships json code:
     
         {
         
+            "Effect": "Allow",
 
+            "Principal": {
+
+                "Federated": "arn:aws:iam::<aws account id> :oidc-provider/token.actions.githubusercontent.com"
+
+            },
+
+            "Action": [
+
+                "sts:AssumeRoleWithWebIdentity",
+
+                "sts:TagSession"
+
+            ],
+
+            "Condition": {
+
+                "StringEquals": {
+
+                    "token.actions.githubusercontent.com:aud": "sts.amazonaws.com"
+
+                },
+
+                "ForAnyValue:StringLike": {
+
+                    "token.actions.githubusercontent.com:sub": "repo:<GitHub organisation name>/<github repo name>:*"
+
+                }
+
+            }
+
+        }
+
+    ]
+
+}
 
 5. Terraform Backend Configuration
 The project uses Terraform Cloud remote backend, configured in main.tf with:
