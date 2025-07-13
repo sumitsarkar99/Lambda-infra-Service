@@ -45,9 +45,13 @@ Example trust policy for GitHub OIDC:
 
 Trust relationships json code:
 {
+
     "Version": "2012-10-17",
+    
     "Statement": [
+    
         {
+        
 
 
 5. Terraform Backend Configuration
