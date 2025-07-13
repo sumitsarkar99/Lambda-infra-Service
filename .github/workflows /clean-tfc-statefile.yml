@@ -1,0 +1,32 @@
+name: Clean TFC State
+
+on:
+  workflow_dispatch:  # Trigger manually
+
+jobs:
+  clean-state:
+    runs-on: ubuntu-latest
+    env:
+      TF_TOKEN_app_terraform_io: ${{ secrets.TF_API_TOKEN }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ~>1.4.0
+
+      - name: Terraform Init (TFC)
+        working-directory: ./edw/test/admin/sbx
+        run: terraform init
+      
+      - name: List resources in state
+        working-directory: ./edw/test/admin/sbx
+        run: terraform state list
+
+      - name: Remove a specific resource from state
+        working-directory: ./edw/test/admin/sbx
+        run: terraform state rm "module.admin.module.admin_functions.snowflake_function.this["DropAssitedDevelopmentArea"]"
+        
