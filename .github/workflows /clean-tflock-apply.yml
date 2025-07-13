@@ -1,0 +1,55 @@
+name: Clean Terraform Lock File
+
+on:
+  workflow_dispatch:
+
+jobs:
+  clean-lockfile:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write  # ✅ Required to push to the repo
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ~> 1.4.7
+
+      - name: Remove .terraform.lock.hcl if exists
+        run: |
+          rm -f .terraform.lock.hcl
+        working-directory: ./edw/test/admin/sbx
+
+      - name: Authenticate to Terraform Cloud
+        run: echo "credentials \"app.terraform.io\" { token = \"$TFC_TOKEN\" }" > ~/.terraformrc
+        env:
+          TFC_TOKEN: ${{ secrets.TF_API_TOKEN }}
+
+      - name: Terraform Init to regenerate lock file
+        run: terraform init
+        working-directory: ./edw/test/admin/sbx
+
+
+      - name: Configure Git
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Commit and Push Updated Lock File
+        run: |
+          cd edw/test/admin/sbx
+          git add .terraform.lock.hcl || echo "No lock file to add"
+          git commit -m "Recreated lock file: removed old snowflake references" || echo "Nothing to commit"
+          git push origin main
+          
+      - name: Terraform Plan
+        run: terraform plan
+        working-directory: ./edw/test/admin/sbx
+      
+      - name: Terraform Apply (Auto Approve)
+        run: terraform apply -auto-approve
+        working-directory: ./edw/test/admin/sbx
